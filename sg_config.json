@@ -1,0 +1,13 @@
+{
+  "source": {
+    "profile": "default",
+    "region": "us-east-1",
+    "vpc_id": "vpc-0e57cadb28821c3f7"
+  },
+
+  "target": {
+    "profile": "dr",
+    "region": "us-east-1",
+    "vpc_id": "vpc-07e9b545595333c38"
+  }
+}
