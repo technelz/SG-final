@@ -1,0 +1,339 @@
+# ==============================================================================
+# RULE CANONICALIZATION - ATOMIC TRAFFIC-BEHAVIOR COMPARISON
+# ==============================================================================
+
+def _normalize_port(value: Any) -> Any:
+    """
+    Normalize port values for stable comparison.
+    AWS may omit FromPort/ToPort for IpProtocol -1.
+    """
+    if value is None:
+        return None
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+
+def _base_rule_fields(rule: Dict[str, Any]) -> Tuple[Any, Any, Any]:
+    """
+    Extract protocol and ports from an AWS IpPermission block.
+    """
+    protocol = rule.get("IpProtocol")
+    from_port = _normalize_port(rule.get("FromPort"))
+    to_port = _normalize_port(rule.get("ToPort"))
+
+    # For all-protocol rules, AWS commonly omits ports.
+    if protocol == "-1":
+        from_port = None
+        to_port = None
+
+    return protocol, from_port, to_port
+
+
+def atomic_rule_key(
+    protocol: Any,
+    from_port: Any,
+    to_port: Any,
+    source_type: str,
+    source_value: str,
+) -> Tuple[Any, Any, Any, str, str]:
+    """
+    Creates the actual comparison key.
+
+    This is traffic-behavior-only. It intentionally excludes:
+    - UserId/account number
+    - rule descriptions
+    - VPC metadata
+    - VPC peering metadata
+    - AWS return ordering/grouping
+    """
+    return (
+        protocol,
+        from_port,
+        to_port,
+        source_type,
+        source_value,
+    )
+
+
+def permission_to_atomic_rules(
+    rule: Dict[str, Any],
+) -> List[Tuple[Tuple[Any, Any, Any, str, str], Dict[str, Any]]]:
+    """
+    Explodes one AWS IpPermission block into atomic rule entries.
+
+    Example:
+    One permission block with two CIDRs becomes two independent atomic rules.
+
+    This prevents false drift when AWS groups or orders permissions differently
+    across accounts, regions, or API responses.
+    """
+    protocol, from_port, to_port = _base_rule_fields(rule)
+
+    atomic_rules: List[Tuple[Tuple[Any, Any, Any, str, str], Dict[str, Any]]] = []
+
+    for item in rule.get("IpRanges", []) or []:
+        cidr = item.get("CidrIp")
+        if not cidr:
+            continue
+
+        key = atomic_rule_key(
+            protocol,
+            from_port,
+            to_port,
+            "cidr",
+            cidr,
+        )
+
+        atomic_rules.append(
+            (
+                key,
+                build_atomic_permission(
+                    protocol=protocol,
+                    from_port=from_port,
+                    to_port=to_port,
+                    source_type="cidr",
+                    source_value=cidr,
+                ),
+            )
+        )
+
+    for item in rule.get("Ipv6Ranges", []) or []:
+        cidr_v6 = item.get("CidrIpv6")
+        if not cidr_v6:
+            continue
+
+        key = atomic_rule_key(
+            protocol,
+            from_port,
+            to_port,
+            "ipv6",
+            cidr_v6,
+        )
+
+        atomic_rules.append(
+            (
+                key,
+                build_atomic_permission(
+                    protocol=protocol,
+                    from_port=from_port,
+                    to_port=to_port,
+                    source_type="ipv6",
+                    source_value=cidr_v6,
+                ),
+            )
+        )
+
+    for item in rule.get("PrefixListIds", []) or []:
+        prefix_list_id = item.get("PrefixListId")
+        if not prefix_list_id:
+            continue
+
+        key = atomic_rule_key(
+            protocol,
+            from_port,
+            to_port,
+            "prefix-list",
+            prefix_list_id,
+        )
+
+        atomic_rules.append(
+            (
+                key,
+                build_atomic_permission(
+                    protocol=protocol,
+                    from_port=from_port,
+                    to_port=to_port,
+                    source_type="prefix-list",
+                    source_value=prefix_list_id,
+                ),
+            )
+        )
+
+    for item in rule.get("UserIdGroupPairs", []) or []:
+        sg_id = item.get("GroupId")
+        if not sg_id:
+            continue
+
+        key = atomic_rule_key(
+            protocol,
+            from_port,
+            to_port,
+            "sg",
+            sg_id,
+        )
+
+        atomic_rules.append(
+            (
+                key,
+                build_atomic_permission(
+                    protocol=protocol,
+                    from_port=from_port,
+                    to_port=to_port,
+                    source_type="sg",
+                    source_value=sg_id,
+                ),
+            )
+        )
+
+    return atomic_rules
+
+
+def build_atomic_permission(
+    protocol: Any,
+    from_port: Any,
+    to_port: Any,
+    source_type: str,
+    source_value: str,
+) -> Dict[str, Any]:
+    """
+    Rebuilds a minimal AWS IpPermission block for one atomic rule.
+
+    This is safe for authorize/revoke calls because each returned permission
+    contains exactly one traffic source/destination.
+    """
+    permission: Dict[str, Any] = {
+        "IpProtocol": protocol,
+    }
+
+    if protocol != "-1":
+        if from_port is not None:
+            permission["FromPort"] = from_port
+        if to_port is not None:
+            permission["ToPort"] = to_port
+
+    if source_type == "cidr":
+        permission["IpRanges"] = [
+            {
+                "CidrIp": source_value,
+            }
+        ]
+        permission["Ipv6Ranges"] = []
+        permission["PrefixListIds"] = []
+        permission["UserIdGroupPairs"] = []
+
+    elif source_type == "ipv6":
+        permission["IpRanges"] = []
+        permission["Ipv6Ranges"] = [
+            {
+                "CidrIpv6": source_value,
+            }
+        ]
+        permission["PrefixListIds"] = []
+        permission["UserIdGroupPairs"] = []
+
+    elif source_type == "prefix-list":
+        permission["IpRanges"] = []
+        permission["Ipv6Ranges"] = []
+        permission["PrefixListIds"] = [
+            {
+                "PrefixListId": source_value,
+            }
+        ]
+        permission["UserIdGroupPairs"] = []
+
+    elif source_type == "sg":
+        permission["IpRanges"] = []
+        permission["Ipv6Ranges"] = []
+        permission["PrefixListIds"] = []
+        permission["UserIdGroupPairs"] = [
+            {
+                "GroupId": source_value,
+            }
+        ]
+
+    else:
+        raise ValueError(f"Unsupported source_type for atomic permission: {source_type}")
+
+    return permission
+
+
+def build_atomic_rule_map(
+    rules: List[Dict[str, Any]],
+) -> Dict[Tuple[Any, Any, Any, str, str], Dict[str, Any]]:
+    """
+    Converts a list of AWS IpPermissions into a dictionary of atomic rule keys.
+
+    Key:
+        protocol, from_port, to_port, source_type, source_value
+
+    Value:
+        minimal AWS permission block for that exact atomic rule
+    """
+    result: Dict[Tuple[Any, Any, Any, str, str], Dict[str, Any]] = {}
+
+    for rule in rules or []:
+        for key, atomic_permission in permission_to_atomic_rules(rule):
+            result[key] = atomic_permission
+
+    return result
+
+
+def canonicalize_rule(rule: Dict[str, Any]) -> str:
+    """
+    Compatibility wrapper.
+
+    Returns a stable representation of the atomic traffic-behavior rules inside
+    a single AWS IpPermission block.
+    """
+    atomic_keys = [
+        key
+        for key, _permission in permission_to_atomic_rules(rule)
+    ]
+
+    return json.dumps(
+        sorted(atomic_keys, key=lambda x: json.dumps(x, sort_keys=True)),
+        sort_keys=True,
+    )
+
+
+def canonicalize_rules(rules: List[Dict[str, Any]]) -> Set[str]:
+    """
+    Compatibility wrapper for older report logic.
+    """
+    atomic_map = build_atomic_rule_map(rules)
+    return {
+        json.dumps(key, sort_keys=True)
+        for key in atomic_map.keys()
+    }
+
+
+def split_rule_diff(
+    existing: List[Dict[str, Any]],
+    desired: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Compares existing vs desired rules using atomic traffic-behavior keys.
+
+    Returns:
+        to_add:
+            desired atomic rules missing from existing
+
+        to_remove:
+            existing atomic rules not present in desired
+
+    In your current source-required-only policy, to_remove is intentionally not
+    applied, but it remains available for reporting or future strict mode.
+    """
+    existing_map = build_atomic_rule_map(existing)
+    desired_map = build_atomic_rule_map(desired)
+
+    to_add = [
+        desired_map[key]
+        for key in sorted(
+            desired_map.keys() - existing_map.keys(),
+            key=lambda x: json.dumps(x, sort_keys=True),
+        )
+    ]
+
+    to_remove = [
+        existing_map[key]
+        for key in sorted(
+            existing_map.keys() - desired_map.keys(),
+            key=lambda x: json.dumps(x, sort_keys=True),
+        )
+    ]
+
+    return to_add, to_remove
