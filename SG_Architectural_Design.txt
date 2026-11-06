@@ -1,0 +1,81 @@
+┌───────────────────────────────────────────────────────────────┐
+│                    CONFIGURATION LAYER                        │
+│ Profiles • Regions • VPCs • Policies • Confidence Thresholds │
+└──────────────────────────────┬────────────────────────────────┘
+                               │
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 1. UNDERSTAND                                                 │
+│                                                               │
+│ Discover source and target:                                   │
+│ • Security Groups and rules                                   │
+│ • VPC CIDR associations                                       │
+│ • Subnets and Availability Zones                              │
+│ • Route tables and route roles                                │
+│ • Managed Prefix Lists                                        │
+│ • CloudFormation and purpose tags                             │
+│ • SG dependencies and cycles                                  │
+│                                                               │
+│ Classify every atomic rule source:                            │
+│ • SG reference                                                │
+│ • IPv4 CIDR                                                   │
+│ • IPv6 CIDR                                                   │
+│ • Prefix list                                                 │
+└──────────────────────────────┬────────────────────────────────┘
+                               │
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 2. TRANSLATE                                                  │
+│                                                               │
+│ SG         → Discover target SG equivalent                    │
+│ CIDR       → Determine network meaning and target equivalent  │
+│ Prefix list→ Discover target prefix-list equivalent           │
+│ Universal  → Preserve explicitly                              │
+│ External   → Preserve only with sufficient routing evidence   │
+│                                                               │
+│ Output: Desired target atomic rules                           │
+└──────────────────────────────┬────────────────────────────────┘
+                               │
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 3. VALIDATE                                                   │
+│                                                               │
+│ Validate:                                                     │
+│ • Match uniqueness                                            │
+│ • Address family                                              │
+│ • CIDR containment and relative offset                        │
+│ • Route-role compatibility                                    │
+│ • Dependency completeness                                     │
+│ • Prefix-list identity                                        │
+│ • Rule validity                                               │
+│ • Target duplicates                                           │
+│ • Apply policy                                                │
+│                                                               │
+│ HIGH confidence   → Eligible for apply                         │
+│ MEDIUM confidence → Operator review                            │
+│ LOW confidence    → Blocked                                   │
+└──────────────────────────────┬────────────────────────────────┘
+                               │
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 4. APPLY                                                      │
+│                                                               │
+│ • Create missing SG shells                                    │
+│ • Refresh target inventory                                    │
+│ • Rebuild SG ID translation map                               │
+│ • Add validated missing atomic rules                          │
+│ • Synchronize approved tags                                   │
+│ • Preserve target-only rules                                  │
+│ • Record rollback actions                                     │
+└──────────────────────────────┬────────────────────────────────┘
+                               │
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 5. VERIFY                                                     │
+│                                                               │
+│ • Re-read target live state                                   │
+│ • Re-run Understand, Translate, and Validate                   │
+│ • Confirm desired rules exist                                 │
+│ • Confirm no blocked dependencies remain                      │
+│ • Generate post-apply convergence result                      │
+└───────────────────────────────────────────────────────────────┘

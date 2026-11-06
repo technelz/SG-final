@@ -1,13 +1,32 @@
 {
   "source": {
     "profile": "default",
-    "region": "us-east-1",
-    "vpc_id": "vpc-0e57cadb28821c3f7"
+    "account_id": "596630283603",
+    "region": "us-west-2",
+    "vpc_id": "vpc-052ef95badbea7c40"
   },
-
   "target": {
-    "profile": "dr",
+    "profile": "dr-ida",
+    "account_id": "449641176781",
     "region": "us-east-1",
-    "vpc_id": "vpc-07e9b545595333c38"
+    "vpc_id": "vpc-0562e4d2bfd866d8a"
+  },
+  "policy": {
+    "reconciliation_mode": "source-required-only",
+    "minimum_apply_confidence": "HIGH",
+    "create_missing_security_groups": true,
+    "sync_tags": true,
+    "preserve_target_extra_rules": true,
+    "block_ambiguous_matches": true,
+    "block_unresolved_dependencies": true,
+    "allow_external_cidr_preservation": true,
+    "allow_relative_cidr_translation": true,
+    "require_post_apply_validation": true
+  },
+  "reporting": {
+    "report_directory": "sg_reports",
+    "rollback_directory": "rollback",
+    "write_json": true,
+    "write_markdown": true
   }
 }
